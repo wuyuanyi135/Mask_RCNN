@@ -12,19 +12,19 @@ Usage: import the module (see Jupyter notebooks for examples), or run from
        the command line as such:
 
     # Train a new model starting from pre-trained COCO weights
-    python3 balloon.py train --dataset=/path/to/balloon/dataset --weights=coco
+    python3 crystals.py train --dataset=/path/to/balloon/dataset --weights=coco
 
     # Resume training a model that you had trained earlier
-    python3 balloon.py train --dataset=/path/to/balloon/dataset --weights=last
+    python3 crystals.py train --dataset=/path/to/balloon/dataset --weights=last
 
     # Train a new model starting from ImageNet weights
-    python3 balloon.py train --dataset=/path/to/balloon/dataset --weights=imagenet
+    python3 crystals.py train --dataset=/path/to/balloon/dataset --weights=imagenet
 
     # Apply color splash to an image
-    python3 balloon.py splash --weights=/path/to/weights/file.h5 --image=<URL or path to file>
+    python3 crystals.py splash --weights=/path/to/weights/file.h5 --image=<URL or path to file>
 
     # Apply color splash to video using the last weights you trained
-    python3 balloon.py splash --weights=last --video=<URL or path to file>
+    python3 crystals.py splash --weights=last --video=<URL or path to file>
 """
 
 import os
@@ -33,6 +33,8 @@ import json
 import datetime
 import numpy as np
 import skimage.draw
+import csv
+import itertools
 
 # Root directory of the project
 ROOT_DIR = os.path.abspath("../../")
@@ -91,7 +93,7 @@ class CrystalDataset(utils.Dataset):
 
         # Train or validation dataset?
         assert subset in ["train", "val"]
-        dataset_dir = os.path.join(dataset_dir, subset)
+        # dataset_dir = os.path.join(dataset_dir, subset)
 
         # Load annotations
         # VGG Image Annotator saves each image in the form:
@@ -108,33 +110,41 @@ class CrystalDataset(utils.Dataset):
         #   'size': 100202
         # }
         # We mostly care about the x and y coordinates of each region
-        annotations = json.load(open(os.path.join(dataset_dir, "via_region_data.json")))
-        annotations = list(annotations.values())  # don't need the dict keys
 
-        # The VIA tool saves images in the JSON even if they don't have any
-        # annotations. Skip unannotated images.
-        annotations = [a for a in annotations if a['regions']]
+        
+        # get all batches in the dataset
+        
+        batches = [name for name in os.listdir(dataset_dir)
+            if os.path.isdir(os.path.join(dataset_dir, name))]
+        batches_full_path = [os.path.join(dataset_dir, x) for x in batches]
 
-        # Add images
-        for a in annotations:
-            # Get the x, y coordinaets of points of the polygons that make up
-            # the outline of each object instance. There are stores in the
-            # shape_attributes (see json format above)
-            polygons = [r['shape_attributes'] for r in a['regions'].values()]
+        for batch_path in batches_full_path:
+            annotation_file_path = os.path.join(batch_path, "via_region_data.csv");
+            if not os.path.exists(annotation_file_path):
+                # this batch has not been labelled
+                continue
+                
+            with open(annotation_file_path, "r") as annotation_file:
+                annotation = csv.reader(annotation_file)
+                next(annotation) # skip the first comment line
+                grouped_annotation = itertools.groupby(annotation, lambda x: x[0])
+                for image_file, g in grouped_annotation:
+                    shape_entries = [json.loads(x[5]) for x in g]
+                    # skip empty files (without label)
+                    if not bool(shape_entries[0]):
+                        continue
 
-            # load_mask() needs the image size to convert polygons to masks.
-            # Unfortunately, VIA doesn't include it in JSON, so we must read
-            # the image. This is only managable since the dataset is tiny.
-            image_path = os.path.join(dataset_dir, a['filename'])
-            image = skimage.io.imread(image_path)
-            height, width = image.shape[:2]
+                    # add image
+                    image_full_path = os.path.join(batch_path, image_file)
+                    image = skimage.io.imread(image_full_path)
+                    height, width = image.shape[:2]
+                    self.add_image(
+                        "crystal",
+                        image_id=image_file,  # use file name as a unique image id
+                        path=image_full_path,
+                        width=width, height=height,
+                        shapes=shape_entries)
 
-            self.add_image(
-                "balloon",
-                image_id=a['filename'],  # use file name as a unique image id
-                path=image_path,
-                width=width, height=height,
-                polygons=polygons)
 
     def load_mask(self, image_id):
         """Generate instance masks for an image.
@@ -143,17 +153,17 @@ class CrystalDataset(utils.Dataset):
             one mask per instance.
         class_ids: a 1D array of class IDs of the instance masks.
         """
-        # If not a balloon dataset image, delegate to parent class.
+        # If not a crystal dataset image, delegate to parent class.
         image_info = self.image_info[image_id]
-        if image_info["source"] != "balloon":
+        if image_info["source"] != "crystal":
             return super(self.__class__, self).load_mask(image_id)
 
         # Convert polygons to a bitmap mask of shape
         # [height, width, instance_count]
         info = self.image_info[image_id]
-        mask = np.zeros([info["height"], info["width"], len(info["polygons"])],
+        mask = np.zeros([info["height"], info["width"], len(info["shapes"])],
                         dtype=np.uint8)
-        for i, p in enumerate(info["polygons"]):
+        for i, p in enumerate(info["shapes"]):
             # Get indexes of pixels inside the polygon and set them to 1
             rr, cc = skimage.draw.polygon(p['all_points_y'], p['all_points_x'])
             mask[rr, cc, i] = 1
@@ -281,7 +291,7 @@ if __name__ == '__main__':
                         help="'train' or 'splash'")
     parser.add_argument('--dataset', required=False,
                         metavar="/path/to/balloon/dataset/",
-                        help='Directory of the Balloon dataset')
+                        help='Directory of the Balloon dataset the common dir of the batches')
     parser.add_argument('--weights', required=True,
                         metavar="/path/to/weights.h5",
                         help="Path to weights .h5 file or 'coco'")
