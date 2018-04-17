@@ -68,13 +68,13 @@ class CrystalConfig(Config):
     IMAGES_PER_GPU = 1
 
     # Number of classes (including background)
-    NUM_CLASSES = 1 + 1  # Background + balloon
+    NUM_CLASSES = 1 + 1  # Background + crystal
 
     # Number of training steps per epoch
     STEPS_PER_EPOCH = 100
 
-    # Skip detections with < 80% confidence
-    DETECTION_MIN_CONFIDENCE = 0.8
+    # Skip detections with < 90% confidence
+    DETECTION_MIN_CONFIDENCE = 0.9
 
 
 ############################################################
@@ -87,7 +87,7 @@ class CrystalDataset(utils.Dataset):
         """Load a subset of the crystal dataset.
         dataset_dir: Root directory of the dataset.
         subset: Subset to load: train or val
-        """
+        """       
         # Add classes. We have only one class to add.
         self.add_class("crystal", 1, "crystal")
 
@@ -119,7 +119,7 @@ class CrystalDataset(utils.Dataset):
         batches_full_path = [os.path.join(dataset_dir, x) for x in batches]
 
         for batch_path in batches_full_path:
-            annotation_file_path = os.path.join(batch_path, "via_region_data.csv");
+            annotation_file_path = os.path.join(batch_path, "via_region_data.csv")
             if not os.path.exists(annotation_file_path):
                 # this batch has not been labelled
                 continue
@@ -165,8 +165,14 @@ class CrystalDataset(utils.Dataset):
                         dtype=np.uint8)
         for i, p in enumerate(info["shapes"]):
             # Get indexes of pixels inside the polygon and set them to 1
-            rr, cc = skimage.draw.polygon(p['all_points_y'], p['all_points_x'])
-            mask[rr, cc, i] = 1
+            if p['name'] == 'polygon':
+                rr, cc = skimage.draw.polygon(p['all_points_y'], p['all_points_x'])
+                mask[rr, cc, i] = 1
+
+            if p['name'] == 'circle':
+                rr, cc = skimage.draw.circle(p['cy'], p['cx'], p['r'], (info["height"], info["width"]))
+                mask[rr, cc, i] = 1
+            
 
         # Return mask, and array of class IDs of each instance. Since we have
         # one class ID only, we return an array of 1s
@@ -175,7 +181,7 @@ class CrystalDataset(utils.Dataset):
     def image_reference(self, image_id):
         """Return the path of the image."""
         info = self.image_info[image_id]
-        if info["source"] == "balloon":
+        if info["source"] == "crystal":
             return info["path"]
         else:
             super(self.__class__, self).image_reference(image_id)
