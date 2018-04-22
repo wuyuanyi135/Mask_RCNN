@@ -26,6 +26,11 @@ Usage: import the module (see Jupyter notebooks for examples), or run from
     # Apply color splash to video using the last weights you trained
     python3 crystals.py splash --weights=last --video=<URL or path to file>
 """
+import tensorflow as tf
+from keras.backend.tensorflow_backend import set_session
+config = tf.ConfigProto()
+config.gpu_options.per_process_gpu_memory_fraction = 0.8
+set_session(tf.Session(config=config))
 
 import os
 import sys
@@ -367,6 +372,8 @@ if __name__ == '__main__':
         model.load_weights(weights_path, by_name=True, exclude=[
             "mrcnn_class_logits", "mrcnn_bbox_fc",
             "mrcnn_bbox", "mrcnn_mask"])
+    elif args.weights.lower() == "none":
+        pass
     else:
         model.load_weights(weights_path, by_name=True)
 
